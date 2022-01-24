@@ -158,7 +158,7 @@ opt=odeset('mass',M.Mc,'jacobian',M.MA);
 [t_ode,x_ode]=ode23s(func,[0 0.02],x_ode_init,opt);
 x_ode_init= x_ode(end,:);
 y=M.C*x_ode';
-
+y(2,:)=[];
 
 array_t_ode23=[array_t_ode23;0.02*(1+k)+t_ode];
 array_th_ode23=[array_th_ode23;y'];

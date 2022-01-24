@@ -11,6 +11,8 @@ model.modelPath(['D:\usr']);
 
 model.param.set('M0', '0[N*m]');
 model.param.set('dtFem', '0.02[s]');
+model.param.set('phi', '0[rad]');
+model.param.set('phi_t', '0[rad/s]');
 
 model.component.create('comp1', true);
 model.component('comp1').geom.create('geom1', 2);
@@ -40,6 +42,7 @@ model.component('comp1').physics('mbd').feature('gr1').selection.set([1]);
 
 model.component('comp1').mesh('mesh1').create('map1', 'Map');
 model.component('comp1').probe.create('dom1', 'Domain');
+model.component('comp1').probe.create('dom2', 'Domain');
 
 model.component('comp1').material.create('mat1', 'Common');
 model.component('comp1').material('mat1').propertyGroup.create('Enu', 'Young''s modulus and Poisson''s ratio');
@@ -58,9 +61,15 @@ model.component('comp1').physics('mbd').feature('hgj1').feature('afm1').set('App
 model.component('comp1').physics('mbd').feature('hgj1').feature('afm1').set('PointOfApplicationType', 'CenterOfJoint');
 model.component('comp1').physics('mbd').feature('hgj1').feature('afm1').set('Mz', 'input1');
 model.component('comp1').physics('mbd').feature('hgj1').feature('afm1').set('Ms', 'M0');
+model.component('comp1').physics('mbd').feature('rd1').set('InitialValueType', 'locallyDefined');
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
 
 model.component('comp1').mesh('mesh1').run;
 model.component('comp1').probe('dom1').set('expr', 'mbd.rd1.phi');
+model.component('comp1').probe('dom2').set('intsurface', true);
+model.component('comp1').probe('dom2').set('intvolume', true);
+model.component('comp1').probe('dom2').set('expr', 'mbd.rd1.th_tz');
 
 model.study.create('std1');
 model.study('std1').create('time', 'Transient');
@@ -104,7 +113,6 @@ model.sol('sol1').feature('v1').feature('comp1_u').set('scalemethod', 'auto');
 model.sol('sol1').feature('v1').feature('comp1_u').set('resscalemethod', 'auto');
 model.sol('sol1').feature('v1').feature('comp1_mbd_rd1_u').set('scalemethod', 'auto');
 model.sol('sol1').feature('v1').feature('comp1_mbd_rd1_phi').set('scalemethod', 'auto');
-model.sol('sol1').feature('v1').feature('comp1_mbd_hgj1_th').set('scalemethod', 'auto');
 model.sol('sol1').feature('t1').label('Time-Dependent Solver 1.1');
 model.sol('sol1').feature('t1').set('control', 'user');
 model.sol('sol1').feature('t1').set('rtol', 0.001);
@@ -139,9 +147,11 @@ array_t_ode23=[];
 array_th_ode23=[];
 
 
-model.sol('sol1').feature('v1').set('initmethod', 'sol');
-model.sol('sol1').feature('v1').set('initsol', 'sol1');
-model.sol('sol1').feature('v1').set('solnum', 'last');
+% model.sol('sol1').feature('v1').set('initmethod', 'sol');
+% model.sol('sol1').feature('v1').set('initsol', 'sol1');
+% model.sol('sol1').feature('v1').set('solnum', 'last');
+M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod','init');
+
 %% Assumed feedback gian, CLF
 kp =6;
 kd =5;
@@ -150,15 +160,16 @@ slack = 1e3;
 u_max=7;
 u_ref=pi;
 nt=2;
-x_ode_init=[0;0];
-M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1'}, 'sparse', 'off', 'initmethod', 'init');
-for k=1:100
+phi=0;
+phi_t=0;
+x_init=[0;0];
+
+for k=1:10
 func = @(tt,xx)M.MA*xx+M.MB*100;
 opt=odeset('mass',M.Mc,'jacobian',M.MA);
-[t_ode,x_ode]=ode23s(func,[0 0.02],x_ode_init,opt);
-x_ode_init= x_ode(end,:);
+[t_ode,x_ode]=ode23s(func,[0 0.02],x_init,opt);
 y=M.C*x_ode';
-
+x_init=x_ode(end,:);
 
 array_t_ode23=[array_t_ode23;0.02*(1+k)+t_ode];
 array_th_ode23=[array_th_ode23;y'];
@@ -168,10 +179,15 @@ t=mphglobal(model,'root.t')+t(end);
 array_t=[array_t;t];
 th=mphglobal(model,'mbd.hgj1.th');
 array_th=[array_th;th];
+phi=array_th(end);
 th_t=mphglobal(model,'mbd.hgj1.th_t');
 array_th_t=[array_th_t;th_t];
+phi_t=array_th_t(end);
+model.param.set('phi', strcat( num2str(array_th(end)),'[rad]'));
+model.param.set('phi_t', strcat( num2str(array_th_t(end)),'[rad/s]'));
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
 model.sol('sol1').runAll;
-
 end
 
 figure(1)
