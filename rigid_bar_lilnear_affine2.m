@@ -150,31 +150,24 @@ array_th_ode23=[];
 % model.sol('sol1').feature('v1').set('initmethod', 'sol');
 % model.sol('sol1').feature('v1').set('initsol', 'sol1');
 % model.sol('sol1').feature('v1').set('solnum', 'last');
-M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod','init');
+M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod','sol','solnum','first');
 
 %% Assumed feedback gian, CLF
-kp =6;
-kd =5;
-clf_rate=3;
-slack = 1e3;
-u_max=7;
-u_ref=pi;
-nt=2;
+x_init=[0;0];
+u=0;
 phi=0;
 phi_t=0;
-x_init=[0;0];
 
-for k=1:100
-func = @(tt,xx)M.MA*xx+M.MB*100;
-opt=odeset('mass',M.Mc,'jacobian',M.MA);
-[t_ode,x_ode]=ode23s(func,[0 0.02],x_init,opt);
-y=M.C*x_ode';
-x_init=x_ode(end,:);
+for k=1:10
+model.param.set('M0', strcat(num2str(u),'[N*m]'));
+model.param.set('phi', strcat( num2str(array_th(end)),'[rad]'));
+model.param.set('phi_t', strcat( num2str(array_th_t(end)),'[rad/s]'));
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
+model.sol('sol1').runAll;
+M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod', 'sol','solnum','first');
+model.sol('sol1').runAll;
 
-array_t_ode23=[array_t_ode23;0.02*(1+k)+t_ode];
-array_th_ode23=[array_th_ode23;y'];
-
-model.param.set('M0', '100[N*m]');
 t=mphglobal(model,'root.t')+t(end);
 array_t=[array_t;t];
 th=mphglobal(model,'mbd.hgj1.th');
@@ -183,11 +176,16 @@ phi=array_th(end);
 th_t=mphglobal(model,'mbd.hgj1.th_t');
 array_th_t=[array_th_t;th_t];
 phi_t=array_th_t(end);
-model.param.set('phi', strcat( num2str(array_th(end)),'[rad]'));
-model.param.set('phi_t', strcat( num2str(array_th_t(end)),'[rad/s]'));
-model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
-model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
-model.sol('sol1').runAll;
+
+func = @(tt,xx)M.MA*xx+M.MB*u;
+opt=odeset('mass',M.Mc,'jacobian',M.MA);
+[t_ode,x_ode]=ode23s(func,[0, 0.02],M.x0,opt);
+y=M.C*x_ode'+phi;
+y(2,:)=[];
+
+array_t_ode23=[array_t_ode23;0.02*k+t_ode];
+array_th_ode23=[array_th_ode23;y'];
+u=10*sin(t(end)/2);
 end
 
 figure(1)

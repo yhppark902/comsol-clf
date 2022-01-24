@@ -109,10 +109,11 @@ model.sol('sol1').feature('v1').set('control', 'user');
 model.sol('sol1').feature('v1').set('initsol', 'zero');
 model.sol('sol1').feature('v1').set('initmethod', 'init');
 model.sol('sol1').feature('t1').set('control', 'time');
-model.sol('sol1').feature('v1').feature('comp1_u').set('scalemethod', 'auto');
-model.sol('sol1').feature('v1').feature('comp1_u').set('resscalemethod', 'auto');
-model.sol('sol1').feature('v1').feature('comp1_mbd_rd1_u').set('scalemethod', 'auto');
-model.sol('sol1').feature('v1').feature('comp1_mbd_rd1_phi').set('scalemethod', 'auto');
+model.sol('sol1').feature('v1').set('scalemethod', 'manual');
+model.sol('sol1').feature('v1').feature('comp1_u').set('scalemethod', 'manual');
+model.sol('sol1').feature('v1').feature('comp1_mbd_rd1_u').set('scalemethod', 'manual');
+model.sol('sol1').feature('v1').feature('comp1_mbd_rd1_phi').set('scalemethod', 'manual');
+model.sol('sol1').feature('v1').feature('comp1_mbd_hgj1_th').set('scalemethod', 'manual');
 model.sol('sol1').feature('t1').label('Time-Dependent Solver 1.1');
 model.sol('sol1').feature('t1').set('control', 'user');
 model.sol('sol1').feature('t1').set('rtol', 0.001);
@@ -150,31 +151,35 @@ array_th_ode23=[];
 % model.sol('sol1').feature('v1').set('initmethod', 'sol');
 % model.sol('sol1').feature('v1').set('initsol', 'sol1');
 % model.sol('sol1').feature('v1').set('solnum', 'last');
-M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod','init');
 
 %% Assumed feedback gian, CLF
 kp =6;
 kd =5;
 clf_rate=3;
 slack = 1e3;
-u_max=7;
-u_ref=pi;
-nt=2;
+umax=7;
+umin=-umax;
+syms x1 x2;
+x = [x1; x2];
+
+%% Init condition
+x_init=[0;0];
+x_ref=pi;
+u=0;
+phi0=pi;
 phi=0;
 phi_t=0;
-x_init=[0;0];
 
 for k=1:100
-func = @(tt,xx)M.MA*xx+M.MB*100;
-opt=odeset('mass',M.Mc,'jacobian',M.MA);
-[t_ode,x_ode]=ode23s(func,[0 0.02],x_init,opt);
-y=M.C*x_ode';
-x_init=x_ode(end,:);
+model.param.set('M0', strcat(num2str(u),'[N*m]'));
+model.param.set('phi', strcat( num2str(array_th(end)),'[rad]'));
+model.param.set('phi_t', strcat( num2str(array_th_t(end)),'[rad/s]'));
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
+model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
 
-array_t_ode23=[array_t_ode23;0.02*(1+k)+t_ode];
-array_th_ode23=[array_th_ode23;y'];
+M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod','sol','solnum','first');
+model.sol('sol1').runAll;
 
-model.param.set('M0', '100[N*m]');
 t=mphglobal(model,'root.t')+t(end);
 array_t=[array_t;t];
 th=mphglobal(model,'mbd.hgj1.th');
@@ -183,11 +188,42 @@ phi=array_th(end);
 th_t=mphglobal(model,'mbd.hgj1.th_t');
 array_th_t=[array_th_t;th_t];
 phi_t=array_th_t(end);
-model.param.set('phi', strcat( num2str(array_th(end)),'[rad]'));
-model.param.set('phi_t', strcat( num2str(array_th_t(end)),'[rad/s]'));
-model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
-model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
-model.sol('sol1').runAll;
+
+
+func = @(tt,xx)M.MA*xx+M.MB*u;
+opt=odeset('mass',M.Mc,'jacobian',M.MA);
+[t_ode,x_ode]=ode23s(func,[0, 0.02],x_init,opt);
+y=M.C*x_ode';
+y(2,:)=[];
+x_init=[phi/M.Null(1,1); phi_t/M.Null(5,2)];
+
+array_t_ode23=[array_t_ode23;0.02*k+t_ode];
+array_th_ode23=[array_th_ode23;y'];
+
+A=[M.A(1,1),M.A(1,2); M.A(2,1)-kp,M.A(2,2)-kd];
+Q=clf_rate*eye(size(A,1));
+P=lyap(A',Q);
+clf= x'*P*x;
+dclf=simplify(jacobian(clf,x));
+xdim=size(A,1);
+udim=size(M.B,2);
+
+x1=x_init(1)-phi0; x2=x_init(2);
+AA=[double(subs(dclf*M.B)),-1];
+b=-double(subs(dclf*A*x))-clf_rate*double(subs(clf));
+%  And max input constraint
+AA=[AA; eye(udim),zeros(udim,1)];
+b=[b;umax];
+% And min inpu contstraint
+AA =[AA;-eye(udim),zeros(udim,1)];
+b=[b;-umin];
+%% Cost
+H=[eye(udim),zeros(udim,1);
+    zeros(1,udim),slack];
+u_ref=[0];
+ff=[u_ref; 0];
+u=quadprog(H,ff,AA,b);
+u=u(1);
 end
 
 figure(1)
