@@ -10,7 +10,7 @@ model.modelPath(['D:\usr']);
 %% FEM parameters
 
 model.param.set('M0', '0[N*m]');
-model.param.set('dtFem', '0.02[s]');
+model.param.set('dtFem', '0.002[s]');
 model.param.set('phi', '0[rad]');
 model.param.set('phi_t', '0[rad/s]');
 
@@ -26,7 +26,7 @@ model.component('comp1').geom('geom1').create('pt1', 'Point');
 model.component('comp1').geom('geom1').run('pt1');
 model.component('comp1').geom('geom1').create('rot1', 'Rotate');
 model.component('comp1').geom('geom1').feature('rot1').selection('input').set({'r1'});
-model.component('comp1').geom('geom1').feature('rot1').set('rot', 180);
+model.component('comp1').geom('geom1').feature('rot1').set('rot', 0);
 model.component('comp1').geom('geom1').run;
 
 model.component('comp1').physics.create('mbd', 'MultibodyDynamics', 'geom1');
@@ -47,7 +47,7 @@ model.component('comp1').probe.create('dom2', 'Domain');
 model.component('comp1').material.create('mat1', 'Common');
 model.component('comp1').material('mat1').propertyGroup.create('Enu', 'Young''s modulus and Poisson''s ratio');
 model.component('comp1').material('mat1').label('Structural steel');
-model.component('comp1').material('mat1').propertyGroup('def').set('density', '7850[kg/m^3]');
+model.component('comp1').material('mat1').propertyGroup('def').set('density', '7850e-3[kg/m^3]');
 model.component('comp1').material('mat1').propertyGroup('Enu').set('E', '200e9[Pa]');
 model.component('comp1').material('mat1').propertyGroup('Enu').set('nu', '0.30');
 
@@ -64,6 +64,10 @@ model.component('comp1').physics('mbd').feature('hgj1').feature('afm1').set('Ms'
 model.component('comp1').physics('mbd').feature('rd1').set('InitialValueType', 'locallyDefined');
 model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
 model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
+
+model.component('comp1').physics('mbd').feature('hgj1').create('fric1', 'Friction', -1);
+model.component('comp1').physics('mbd').feature('hgj1').feature('fric1').set('mu', 0.2);
+model.component('comp1').physics('mbd').feature('hgj1').feature('fric1').set('v0', 0);
 
 model.component('comp1').mesh('mesh1').run;
 model.component('comp1').probe('dom1').set('expr', 'mbd.rd1.phi');
@@ -125,81 +129,69 @@ model.sol('sol1').feature('t1').feature('aDef').set('cachepattern', true);
 model.sol('sol1').feature('t1').feature('fc1').label('Fully Coupled 1.1');
 model.sol('sol1').feature('t1').feature('fc1').set('maxiter', 50);
 model.sol('sol1').feature('t1').feature('fc1').set('jtech', 'onevery');
-model.sol('sol1').runAll;
 
-model.result.numerical('pev1').set('const', {'mbd.refpntx' '0' 'Reference point for moment computation, x component'; 'mbd.refpnty' '0' 'Reference point for moment computation, y component'; 'mbd.refpntz' '0' 'Reference point for moment computation, z component'});
-model.result.numerical('pev1').setResult;
-model.result('pg1').set('xlabel', 'Time (s)');
-model.result('pg1').set('ylabel', 'Rigid body rotation (rad), Domain Probe 1');
-model.result('pg1').feature('tblp1').label('Probe Table Graph 1');
-model.result('pg1').feature('tblp1').set('plotcolumninput', 'manual');
-model.result('pg1').feature('tblp1').set('legend', true);
-model.result('pg1').feature('tblp1').set('table', 'tbl1');
-model.result('pg1').feature('tblp1').set('plotcolumns', [2]);
-model.result('pg1').run;
-%% System Identification
-t=mphglobal(model,'root.t');
-array_t=t;
-th=mphglobal(model,'mbd.hgj1.th');
-array_th=th;
-th_t=mphglobal(model,'mbd.hgj1.th_t');
-array_th_t=th_t;
-array_t_ode23=[];
-array_th_ode23=[];
-
-
-% model.sol('sol1').feature('v1').set('initmethod', 'sol');
-% model.sol('sol1').feature('v1').set('initsol', 'sol1');
-% model.sol('sol1').feature('v1').set('solnum', 'last');
 
 %% Assumed feedback gian, CLF
-kp =6;
-kd =5;
+kp =6e1;
+kd =5e2;
 clf_rate=3;
-slack = 1e3;
-umax=7;
+slack = 1e5;
+umax=100;
 umin=-umax;
 syms x1 x2;
 x = [x1; x2];
 
 %% Init condition
 x_init=[0;0];
-x_ref=pi;
 u=0;
-phi=0;
+phi=0.1;
 phi_t=0;
 
-for k=1:100
+%% System Identification
+t=[0];
+array_t=t;
+th=[phi];
+array_th=th;
+th_t=[0];
+array_th_t=th_t;
+array_t_ode23=[];
+array_th_ode23=[];
+
+for k=1:5e3
+%% Comsol Paramset
 model.param.set('M0', strcat(num2str(u),'[N*m]'));
-model.param.set('phi', strcat( num2str(array_th(end)),'[rad]'));
-model.param.set('phi_t', strcat( num2str(array_th_t(end)),'[rad/s]'));
+model.param.set('phi', phi,'[rad]');
+model.param.set('phi_t', phi_t,'[rad/s]');
 model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phi', 'phi');
 model.component('comp1').physics('mbd').feature('rd1').feature('init1').set('phit', 'phi_t');
-
-M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod','sol','solnum','first');
 model.sol('sol1').runAll;
+M = mphstate(model,'sol1','out',{'Mc' 'MA' 'MB' 'A' 'B' 'C' 'D' 'x0', 'Null', 'ud'},'input', {'M0'}, 'output', {'comp1.dom1','comp1.dom2'}, 'sparse', 'off', 'initmethod','sol','solnum','first');
+
+%% ODE23s Param set(DAE is stiff. So, manipulate with jacobian and Mc)
+x_init=[phi/M.Null(1,1); phi_t/M.Null(5,2)];
+x1=x_init(1)
+x2=x_init(2);
+func = @(tt,xx)M.MA*xx+M.MB*u;
+opt=odeset('mass',M.Mc,'jacobian',M.MA);
+[t_ode,x_ode]=ode23s(func,[0, 0.002],x_init,opt);
+y=M.C*x_ode';
+y(2,:)=[];
+
+array_t_ode23=[array_t_ode23;0.002*(k-1)+t_ode];
+array_th_ode23=[array_th_ode23;y'];
 
 t=mphglobal(model,'root.t')+t(end);
 array_t=[array_t;t];
 th=mphglobal(model,'mbd.hgj1.th');
 array_th=[array_th;th];
-phi=array_th(end);
+phi=array_th(end)
 th_t=mphglobal(model,'mbd.hgj1.th_t');
 array_th_t=[array_th_t;th_t];
 phi_t=array_th_t(end);
 
-
-func = @(tt,xx)M.MA*xx+M.MB*u;
-opt=odeset('mass',M.Mc,'jacobian',M.MA);
-[t_ode,x_ode]=ode23s(func,[0, 0.02],x_init,opt);
-y=M.C*x_ode';
-y(2,:)=[];
-x_init=[phi/M.Null(1,1); phi_t/M.Null(5,2)];
-
-array_t_ode23=[array_t_ode23;0.02*k+t_ode];
-array_th_ode23=[array_th_ode23;y'];
-
-A=[M.A(1,1),M.A(1,2); M.A(2,1)-kp,M.A(2,2)-kd];
+%% Constraints : A[u; slack] <= b
+% Determine control input
+A=[M.A(1,1),M.A(1,2); M.A(2,1)-kp/M.Null(1,1),M.A(2,2)-kd/M.Null(5,2)];
 Q=clf_rate*eye(size(A,1));
 P=lyap(A',Q);
 clf= x'*P*x;
@@ -207,7 +199,6 @@ dclf=simplify(jacobian(clf,x));
 xdim=size(A,1);
 udim=size(M.B,2);
 
-x1=M.Null(1,1)*x_init(1); x2=M.Null(5,2)*x_init(2);
 AA=[double(subs(dclf*M.B)),-1];
 b=-double(subs(dclf*A*x))-clf_rate*double(subs(clf));
 %  And max input constraint
@@ -219,9 +210,10 @@ b=[b;-umin];
 %% Cost
 H=[eye(udim),zeros(udim,1);
     zeros(1,udim),slack];
+u_ref=zeros(1,udim);
 ff=[u_ref; 0];
 u=quadprog(H,ff,AA,b);
-u=u(1);
+u=u(1)
 end
 
 figure(1)
